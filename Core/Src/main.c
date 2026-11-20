@@ -7,6 +7,10 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  */
 
+#include "Preset/voiceStore.h"
+#include "customVersion.h"
+#include "menu/lsMenu.h"
+#include "Preset/voiceLoad.h"
 #include "main.h"
 #include "fatfs.h"
 
@@ -387,6 +391,14 @@ if(sd_card_ok)
 			preset_loadDrumsetSD(i);
 		}
 
+		//load all voice presets (/voices) into RAM, see voiceStore.h
+		lcd_clear();
+		lcd_home();
+		lcd_string(PSTR("Loading voices"));
+		lcd_setcursor(0,2);
+		lcd_string(CUSTOM_FW_REVISION);
+		voiceStore_init();
+
 		//init morph target to peset 0
 		//morphParameters = mainParameters[0];
 		activeParameters[PAR_MORPH_TARGET] = 0;
@@ -468,6 +480,8 @@ voiceControl_start();
 
 	//  menu_tick();
 	  CV_process();
+	  voiceLoad_tick(HAL_GetTick()); //apply staged voice sounds when quiet
+	  lsMenu_tick(HAL_GetTick());    //Load/Save menu messages and loading marker
 	  soundengine_process();
 	  adc_checkPots();
 	  soundengine_process();

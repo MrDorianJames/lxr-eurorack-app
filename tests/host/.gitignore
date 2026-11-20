@@ -1,0 +1,8 @@
+test_voice
+test_store
+test_load
+test_menu
+test_cfg
+test_mix
+test_undo
+gen/

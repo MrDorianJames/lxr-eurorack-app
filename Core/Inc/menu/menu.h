@@ -708,6 +708,8 @@ uint8_t menu_getActivePage();
 //-----------------------------------------------------------------
 /** get the currently active voice nr*/
 uint8_t menu_getActiveVoice();
+uint8_t menu_numNameChars(void);		//name characters, in knob scroll order
+char menu_nameChar(uint8_t index);
 //-----------------------------------------------------------------
 void menu_setActiveVoice(uint8_t voiceNr);
 //-----------------------------------------------------------------

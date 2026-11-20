@@ -13,6 +13,7 @@
 
 
 
+#include "globalMix.h"
 #include "Soundengine/DSPAudio/modulationNode.h"
 #include "Soundengine/DSPAudio/DrumVoice.h"
 #include "Soundengine/DSPAudio/CymbalVoice.h"
@@ -214,7 +215,9 @@ void modNode_updateValue(ModulationNode* vm, float val)
 	}
 	else
 	{
-		float originalValue = activeParameters[vm->destination]/127.f;
+		//base value: the kit value, or the global routing/mix value that
+		//replaces it (globalMix.h), so modulation never brings the kit value back
+		float originalValue = globalMix_filter(vm->destination, activeParameters[vm->destination])/127.f;
 		//val is [0:1] make [-1:1] for bipolar modulation around original value
 
 		float newValue;

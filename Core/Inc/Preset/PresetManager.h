@@ -112,6 +112,7 @@ void preset_morph_tick(); //handler for non blocking morph
 uint8_t preset_getMorphValue(uint16_t index, uint8_t morph);
 void preset_sendDrumsetParameters();
 void preset_sendDrumsetParametersImmediate();
+void preset_sendParameter(uint16_t idx); //send one edit buffer parameter to the engine (main loop only)
 
 uint8_t preset_isNameEmpty(char* name);
 

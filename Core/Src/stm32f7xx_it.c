@@ -19,6 +19,7 @@
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
+#include "Preset/voiceLoad.h"
 #include "main.h"
 #include "stm32f7xx_it.h"
 /* Private includes ----------------------------------------------------------*/
@@ -225,7 +226,9 @@ void SysTick_Handler(void)
 
   for (int i=0; i<6; i++) {
 
-    if(voiceToBeTriggered[i]) {
+    /* while a voice's sound is being changed the note waits one tick
+       (voiceLoad.h), so a hit never starts with a half-applied sound */
+    if(voiceToBeTriggered[i] && !voiceLoad_isApplying(i)) {
       Trigger_resetVoiceTriggered(i);
       const uint8_t vel = Trigger_getAccent(i);
       voiceControl_noteOn(i , SEQ_DEFAULT_NOTE, vel);
@@ -235,6 +238,12 @@ void SysTick_Handler(void)
     if (Trigger_getVoiceTriggered(i)) {
       voiceToBeTriggered[i] = 1;
     }
+  }
+
+  /* open hihat note that was postponed by its own interrupt */
+  if(Trigger_openHatDeferred && !voiceLoad_isApplying(5)) {
+    Trigger_openHatDeferred = 0;
+    voiceControl_noteOn(6 , SEQ_DEFAULT_NOTE, Trigger_getAccent(6));
   }
 }
 

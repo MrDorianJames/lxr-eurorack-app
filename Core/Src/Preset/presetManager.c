@@ -14,6 +14,7 @@
 //#include "../config.h"
 #include <frontPanelParser_ui.h>
 #include "Preset/PresetManager.h"
+#include "globalMix.h"
 //#include "../Hardware/SD/ff.h"
 #include "../../Middlewares/Third_Party/FatFs/src/ff.h"
 #include <stdio.h>
@@ -776,6 +777,14 @@ FRESULT preset_saveGlobals()
 	res = f_open((FIL*)&SDFile,"glo.cfg",FA_CREATE_ALWAYS | FA_WRITE);
 	if(res != FR_OK) return res;
 	preset_writeGlobalData();
+	{
+		//global routing and mix (globalMix.h) after the stock block;
+		//stock firmware reads only its own block and ignores this
+		uint8_t ext[GLOBALMIX_EXT_LEN];
+		unsigned int extWritten;
+		globalMix_serialize(ext);
+		f_write((FIL*)&SDFile, ext, GLOBALMIX_EXT_LEN, &extWritten);
+	}
 
 	//close the file
 	f_close((FIL*)&SDFile);
@@ -814,6 +823,7 @@ static uint8_t preset_readGlobalData()
 //----------------------------------------------------
 uint8_t preset_loadGlobals()
 {
+	globalMix_setDefaults(); //until the file says otherwise
 
 
 	FRESULT res;
@@ -836,8 +846,16 @@ uint8_t preset_loadGlobals()
 		f_close((FIL*)&SDFile);
 		return 0;
 	}
+	{
+		//global routing and mix (globalMix.h); missing in older files -> stock behaviour
+		uint8_t ext[GLOBALMIX_EXT_LEN];
+		UINT extRead = 0;
+		if(f_read((FIL*)&SDFile, ext, GLOBALMIX_EXT_LEN, &extRead) != FR_OK) extRead = 0;
+		globalMix_deserialize(ext, (uint16_t)extRead);
+	}
 	f_close((FIL*)&SDFile);
 	menu_sendAllGlobals();
+	globalMix_applyAll(); //re-apply fixed routing and mix
 	
 	//f_unmount((TCHAR const*)SDPath);
 
@@ -851,6 +869,7 @@ uint8_t preset_loadGlobals()
 //----------------------------------------------------
 void preset_loadDefaultGlobals()
 {
+	globalMix_setDefaults();
 	activeParameters[PAR_BPM] = 120;
 
 	activeParameters[PAR_MIDI_CHAN_1] = 1;
@@ -3114,3 +3133,31 @@ static void preset_makeFileNameTemp(char *buf, uint8_t num, uint8_t type)
 	strcpy(&buf[4],ext);
 }
 */
+
+//-----------------------------------------------------------------------------
+// Send one kit parameter from the edit buffer to the sound engine, blended
+// with the morph target exactly like preset_morph_tick() does. Used by
+// voice preset loading (voiceLoad.c), which only needs a voice's own
+// parameters instead of a full kit sweep. Main loop only.
+void preset_sendParameter(uint16_t idx)
+{
+	if(idx >= 256) return; /* mod matrix range is never sent this way */
+
+	uint8_t morph = preset_morphValue;
+	if((idx >= PAR_AUDIO_OUT1) && (idx <= PAR_AUDIO_OUT6)) morph = 0;
+
+	const uint8_t val = interpolate(activeParameters[idx],mainParameters[activeParameters[PAR_MORPH_TARGET]][idx],morph);
+	MidiMsg msg = {0,0,0, {0,0,0}};
+	if(idx < 128)
+	{
+		msg.status = MIDI_CC;
+		msg.data1 = (uint8_t)(idx + 1); /* same offset as preset_morph_tick() */
+	}
+	else
+	{
+		msg.status = CC_2;
+		msg.data1 = (uint8_t)(idx - 128);
+	}
+	msg.data2 = val;
+	midiParser_ccHandler(msg,1, 0, 0.f);
+}

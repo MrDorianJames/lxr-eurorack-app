@@ -13,6 +13,7 @@
  */
 
 
+#include <string.h>
 #include "Soundengine/FxBus.h"
 #include "Soundengine/DSPAudio/BufferTools.h"
 #include "Soundengine/DSPAudio/mixer.h"
@@ -136,8 +137,11 @@ IN_ITCM_RAM void FxBus_process(int16_t *fxBuffer, int16_t* outL,int16_t* outR,in
 
 void FxBus_prepareFxChange()
 {
-	//memset(FX_BUFFER, 0, FX_BUFFER_SIZE*sizeof(__fp16) );
-//	Ringmod_resetPhase(&fxBus.ringmod);
+	//clear the shared FX buffer on every FX type change, so the new effect
+	//never starts with the previous effect's audio (leftover echoes, or
+	//noise when a buffer holds data in another number format)
+	memset(FX_BUFFER, 0, (FX_BUFFER_SIZE+1)*sizeof(__fp16) );
+	Ringmod_resetPhase(&fxBus.ringmod);
 }
 
 IN_ITCM_RAM void FxBus_updateParameter()

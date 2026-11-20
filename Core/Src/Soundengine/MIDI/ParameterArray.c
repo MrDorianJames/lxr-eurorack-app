@@ -13,6 +13,7 @@
 
 
 
+#include "globalMix.h"
 #include "Soundengine/MIDI/ParameterArray.h"
 #include "Soundengine/DSPAudio/DrumVoice.h"
 #include "Soundengine/DSPAudio/CymbalVoice.h"
@@ -51,7 +52,8 @@ Parameter parameterArray[PAR_ACTIVE_STEP];
 		return;
 
 	MidiMsg msg;
-	uint8_t val = activeParameters[idx];
+	//the kit value, or the global routing/mix value that replaces it (globalMix.h)
+	uint8_t val = globalMix_filter(idx, activeParameters[idx]);
 
 	if(idx < 128)
 	{

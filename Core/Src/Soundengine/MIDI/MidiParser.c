@@ -12,6 +12,7 @@
  */
 
 
+#include "globalMix.h"
 #include <Soundengine/MIDI/CortexParser.h>
 #include "Soundengine/MIDI/MidiParser.h"
 #include "Soundengine/MIDI/MidiNoteNumbers.h"
@@ -275,6 +276,16 @@ float floatCvToFreq(float val)
 /** handle all incoming CCs and invoke action*/
 void midiParser_ccHandler(MidiMsg msg, uint8_t updateOriginalValue, uint8_t isFloatModulator, float v)
 {
+	//global routing and mix (globalMix.h): fixed outputs, volume and pan.
+	//Only real setting changes are filtered; modulation then centres on
+	//the filtered value, which is stored as the original value below.
+	if(updateOriginalValue && !isFloatModulator)
+	{
+		uint16_t idx = 0xFFFF;
+		if((msg.status & 0xF0) == MIDI_CC)	idx = (uint16_t)(msg.data1 - 1);
+		else if(msg.status == MIDI_CC2)		idx = (uint16_t)(msg.data1 + 128);
+		if(idx != 0xFFFF) msg.data2 = globalMix_filter(idx, msg.data2);
+	}
 
 	struct
 	{

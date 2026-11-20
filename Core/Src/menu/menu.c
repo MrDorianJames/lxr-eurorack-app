@@ -7,6 +7,11 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  */
 
+#include "menu/cfgMenu.h"
+#include "menu/mixMenu.h"
+#include "globalMix.h"
+#include "menu/lsMenu.h"
+#include "Preset/undo.h"
 #include "menu/menu.h"
 #include "lcd.h"
 #include <string.h>
@@ -54,6 +59,7 @@ static void setNoteName(uint8_t num, char *buf);
 
 
 static void menu_moveToMenuItem(int8_t inc);
+static uint8_t menu_isPerfMixItem(uint8_t page, uint8_t subPage, uint8_t item);
 static void menu_encoderChangeParameter(int8_t inc);
 
 #define ARROW_SIGN '>'
@@ -764,6 +770,10 @@ uint8_t activeParameters[NUM_PARAMS];
 //uint8_t morphParameters[END_OF_SOUND_PARAMETERS];/**< a second array for sound x-fade to another preset*/
 //uint8_t *morphParameters;
 //-----------------------------------------------------------------
+// name characters for other menus (lsMenu.c), in knob scroll order
+uint8_t menu_numNameChars(void) { return NUM_CHARS; }
+char menu_nameChar(uint8_t index) { return characterOrder[index < NUM_CHARS ? index : 0]; }
+//-----------------------------------------------------------------
 void copyNameToEditBuffer(uint8_t presetNr, uint8_t nameType)
 {
 	for(int i=0;i<8;i++)
@@ -1058,17 +1068,9 @@ void menu_tick()
 	{
 		if(systick_ticks - sucessTimer > 4000)
 		{
-
-			buttonHandler_setMode(SELECT_MODE_VOICE);
-			led_clearAllBlinkLeds();
-
-
-			//update the status LED
-			led_setMode2(SELECT_MODE_VOICE);
-			//set menu to voice page mode
-			menu_switchPage(menu_getActiveVoice());
-			led_setActiveSelectButton(menu_getSubPage()+1);
-			menu_resetActiveParameter();
+			//after "saved", go to the Perform page like the rest of the
+			//Load/Save menu (lsMenu.h) instead of the voice edit page
+			buttonHandler_enterPerformMode();
 		}
 	}
 
@@ -1796,6 +1798,12 @@ void menu_repaintGeneric()
 
 			} //switch(parameters_dtypes[parNr] & 0x0F) end
 
+			//'*': a global routing/mix setting replaces this kit value (globalMix.h)
+			if(globalMix_isOverridden(parNr, curParmVal))
+			{
+				editDisplayBuffer[1][12] = '*';
+			}
+
 		} // parameter type is not automation target
 
 	} // if editmode active
@@ -1938,7 +1946,24 @@ void menu_repaintGeneric()
 			//write the text to the edit buffer
 			memcpy(&editDisplayBuffer[1][4*i],valueAsText,3);
 
+			//'*': a global routing/mix setting replaces this kit value (globalMix.h)
+			if(parNr != PAR_NONE && globalMix_isOverridden(parNr, curParmVal))
+			{
+				editDisplayBuffer[1][4*i+3] = '*';
+			}
+
 		}	// for 1 to 4 .. each menu item
+
+		//Perform page 1: "mix" in the empty 4th column opens the mixer (mixMenu.h);
+		//the filled down triangle (0xF5) marks a sub-page
+		if(menu_activePage == PERF_PAGE && activePage == 0)
+		{
+			//capitals when the encoder has it selected, like the other columns
+			memcpy(&editDisplayBuffer[0][12], ((menuIndex & MASK_PARAMETER) == 3) ? "MIX" : "mix", 3);
+			editDisplayBuffer[1][12] = ' ';
+			editDisplayBuffer[1][13] = (char)0xF5;
+			editDisplayBuffer[1][14] = ' ';
+		}
 	} // if editmode not active
 }
 
@@ -1962,7 +1987,27 @@ void menu_repaint()
 	if(screensaver_Active) return;
 
 	visibleCursor = 0;
-	if(menu_activePage == LOAD_PAGE || menu_activePage==SAVE_PAGE)
+	if(lsMenu_isToast())
+	{
+		//the undo message is drawn over every screen (lsMenu.h)
+		lsMenu_repaint();
+	}
+	else if(mixMenu_isActive())
+	{
+		//the mixer in the Perform menu (mixMenu.c)
+		mixMenu_repaint();
+	}
+	else if(cfgMenu_isActive())
+	{
+		//the config menu draws its own screens (cfgMenu.c)
+		cfgMenu_repaint();
+	}
+	else if(lsMenu_isActive())
+	{
+		//the Load/Save menu draws its own screens (lsMenu.c)
+		lsMenu_repaint();
+	}
+	else if(menu_activePage == LOAD_PAGE || menu_activePage==SAVE_PAGE)
 	{
 		//this is a special case because the load/save page differs from all the other pages
 		menu_repaintLoadSavePage();
@@ -2371,6 +2416,7 @@ void menu_handleLoadSaveMenu(int8_t inc, uint8_t btnClicked)
 	HAL_TIM_Base_Start_IT(&htim2);	//calc sample interrupt - prio 1
 #endif
 					preset_loadDrumsetRam(menu_selectedPresetNr[menu_saveOptions.category],0, 0);
+					lsMenu_onKitLoaded(menu_selectedPresetNr[menu_saveOptions.category]); //see lsMenu.h
 					menu_TargetVoiceGapIndex = getModTargetGapIndex(activeParameters[PAR_TARGET_LFO1 + menu_activeVoice]);
 
 					menu_loadedPresetNr[CURRENT_KIT] = menu_selectedPresetNr[menu_saveOptions.category];
@@ -2941,6 +2987,17 @@ void menu_parseEncoder(int8_t inc, uint8_t button)
 	// handle the button being clicked or released
 	if(button != lastEncoderButton) { // was the button clicked?
 		btnClicked=button;
+		if(btnClicked && !screensaver_Active && !editModeActive
+				&& !mixMenu_isActive() && !cfgMenu_isActive() && !lsMenu_isActive()
+				&& menu_isPerfMixItem(menu_activePage, (menuIndex&MASK_PAGE)>>PAGE_SHIFT, menuIndex&MASK_PARAMETER))
+		{
+			//push on "mix" (Perform page 1) opens the mixer instead of edit mode
+			lastEncoderButton = button;
+			screensaver_touch();
+			mixMenu_open();
+			menu_repaintAll();
+			return;
+		}
 		if(btnClicked)
 		{
 
@@ -2969,7 +3026,19 @@ void menu_parseEncoder(int8_t inc, uint8_t button)
 	//invert encoder
 	//inc = (int8_t)(inc * -1);
 
-	if(menu_activePage == LOAD_PAGE || menu_activePage == SAVE_PAGE) {
+	//encoder input ends the undo message early (lsMenu.h)
+	lsMenu_dismissToast();
+
+	if(mixMenu_isActive()) {
+		mixMenu_handleEncoder(inc, btnClicked);
+	}
+	else if(cfgMenu_isActive()) {
+		cfgMenu_handleEncoder(inc, btnClicked);
+	}
+	else if(lsMenu_isActive()) {
+		lsMenu_handleEncoder(inc, btnClicked);
+	}
+	else if(menu_activePage == LOAD_PAGE || menu_activePage == SAVE_PAGE) {
 		menu_handleLoadSaveMenu(inc, btnClicked);
 	}
 #if !EURORACK_MODULE
@@ -3071,6 +3140,7 @@ static void menu_encoderChangeParameter(int8_t inc)
 	uint8_t *paramValue;
 
 	paramValue = &activeParameters[paramNr];
+	const uint8_t undoOldValue = *paramValue; //for undo, see below
 
 	//increase parameter value
 	if(inc>0) //positive increase
@@ -3292,6 +3362,9 @@ static void menu_encoderChangeParameter(int8_t inc)
 		break;
 	} //parameter_dtypes[paramNr] & 0x0F
 
+	//remember the old value for undo (Shift + Load/Save, see undo.h)
+	if(*paramValue != undoOldValue)
+		undo_record(paramNr, undoOldValue, HAL_GetTick());
 
 	// TODO this will also send MIDI_CC or CC_2 for the above items that have already been sent. is this desired?
 	//send parameter change to uart tx
@@ -3313,6 +3386,12 @@ static void menu_encoderChangeParameter(int8_t inc)
 //-----------------------------------------------------------------
 // given an encoder wheel change, will set the menu item to the correct new one
 // or not change it if boundaries are reached
+//Perform page 1, 4th column: "mix" opens the mixer (mixMenu.h)
+static uint8_t menu_isPerfMixItem(uint8_t page, uint8_t subPage, uint8_t item)
+{
+	return (page == PERF_PAGE) && (subPage == 0) && (item == 3) && (buttonHandler_getMode() != SELECT_MODE_MOD);
+}
+
 static void menu_moveToMenuItem(int8_t inc)
 {
 
@@ -3378,7 +3457,7 @@ checkvalid:
 			return; // would never happen unless we have > 3 skips in a row
 	}
 
-	if(param == TEXT_EMPTY) // disallow the change
+	if(param == TEXT_EMPTY && !menu_isPerfMixItem(menu_activePage, (uint8_t)activePage, (uint8_t)activeParameter)) // disallow the change
 		return;
 
 	// set the change
@@ -4291,6 +4370,27 @@ uint8_t menu_parseKnobValue(uint8_t potNr, int16_t diff)
 		menu_repaintAll();
 	}
 
+	//knob input ends the undo message early (lsMenu.h)
+	if(diff != 0) lsMenu_dismissToast();
+
+	if(mixMenu_isActive()) {
+		//the mixer in the Perform menu (mixMenu.c)
+		return mixMenu_handleKnob(potNr, (int8_t)diff);
+	}
+	if(menu_activePage == PERF_PAGE && menu_getSubPage() == 0 && potNr == 3 && diff != 0) {
+		//knob 4 under "mix" on Perform page 1 opens the mixer
+		mixMenu_open();
+		return 1;
+	}
+	if(cfgMenu_isActive()) {
+		//the config menu (cfgMenu.c)
+		return cfgMenu_handleKnob(potNr, (int8_t)diff);
+	}
+	{
+		//the Load/Save menu (lsMenu.c) and the kit pages opened from it
+		const int8_t ls = lsMenu_handleKnob(potNr, (int8_t)diff);
+		if(ls >= 0) return (uint8_t)ls;
+	}
 	if( (menu_activePage == SAVE_PAGE) || (menu_activePage == LOAD_PAGE)) {
 		int16_t tmpValue = saveScreenPots[potNr] + diff;
 		if(tmpValue < 0) tmpValue = 0;
@@ -4326,6 +4426,10 @@ uint8_t menu_parseKnobValue(uint8_t potNr, int16_t diff)
 		buttonHandler_resetLock = 1;
 	}
 #endif
+
+	//remember the old value for undo (Shift + Load/Save, see undo.h)
+	if(activeParameters[paramNr] != dtypeValue)
+		undo_record(paramNr, activeParameters[paramNr], HAL_GetTick());
 
 	//update parameter value to the new value
 	//mainParameters[paramNr] = dtypeValue;
@@ -4733,4 +4837,58 @@ void upr_three(char *buf)
 		(*buf) -=32;
 	buf++;
 	END_DISABLE_CONV_WARNING
+}
+
+//-----------------------------------------------------------------
+// helpers for the Load/Save menu (lsMenu_glue.c): undo and revert kit
+
+//"Osc     Coarse  ": category and long name of the first menu entry that edits idx
+void menu_lsParamName(uint16_t idx, char *row16)
+{
+	memset(row16, ' ', 16);
+	row16[16] = 0;
+	for(uint8_t p = 0; p < NUM_PAGES; p++)
+	{
+		for(uint8_t sp = 0; sp < NUM_SUB_PAGES; sp++)
+		{
+			const Page *page = &menuPages[p][sp];
+			for(uint8_t k = 0; k < 8; k++)
+			{
+				if(pgm_read_word(&page->bot1 + k) != idx) continue;
+				const uint8_t textId = pgm_read_byte(&page->top1 + k);
+				if(textId >= NUM_NAMES) continue;
+				const char *cat  = catNames[pgm_read_byte(&valueNames[textId].category)];
+				const char *name = longNames[pgm_read_byte(&valueNames[textId].longName)];
+				for(uint8_t i = 0; i < 8 && cat[i]; i++)  row16[i] = cat[i];
+				for(uint8_t i = 0; i < 8 && name[i]; i++) row16[8 + i] = name[i];
+				return;
+			}
+		}
+	}
+	snprintf(row16, 17, "parameter %u", (unsigned)idx);
+}
+
+//set one kit parameter back and send it, like a kit load does
+void menu_lsRestoreParam(uint16_t idx, uint8_t value)
+{
+	if(idx >= END_OF_SOUND_PARAMETERS) return;
+	activeParameters[idx] = value;
+	preset_sendParameter(idx);
+	menu_TargetVoiceGapIndex = getModTargetGapIndex(activeParameters[PAR_TARGET_LFO1 + menu_activeVoice]);
+	menu_repaintAll();
+}
+
+//load the current kit again from RAM, as last loaded or saved
+void menu_lsReloadCurrentKit(void)
+{
+#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
+	HAL_TIM_Base_Start_IT(&htim2);	//calc sample interrupt - prio 1
+#endif
+	preset_loadDrumsetRam(menu_loadedPresetNr[CURRENT_KIT], 0, 0);
+	menu_TargetVoiceGapIndex = getModTargetGapIndex(activeParameters[PAR_TARGET_LFO1 + menu_activeVoice]);
+	preset_touchTimer(PRESET_KIT_TIMER);
+#if USE_INTERRUPT_ONLY_DURING_SAVE_PROJ
+	HAL_TIM_Base_Stop_IT(&htim2);	//calc sample interrupt - prio 1
+#endif
+	menu_repaintAll();
 }

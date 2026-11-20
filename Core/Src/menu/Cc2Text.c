@@ -429,8 +429,8 @@ uint8_t getModTargetGapIndex(uint8_t modTargetIdx)
 uint8_t getModTargetIdxFromGapIdx(uint8_t v, uint8_t gapidx)
 {
 	uint8_t i, val, bitoffset, ctr=0;
-	if(gapidx==0xFF)
-		return 0; // off
+	if(gapidx==0xFF || gapidx >= NUM_TOT_TARGETS)
+		return 0; // off (an out of range index would read past modTargetGapMap)
 
 	// voice is 0 based. calculate the bit column
 	bitoffset=(uint8_t)(5-v);

@@ -31,6 +31,10 @@ add_library(lxr_platform OBJECT
 set_source_files_properties(Src/main.c PROPERTIES
     COMPILE_DEFINITIONS "FIRMWARE_VERSION=\"${PROJECT_VERSION}\""
 )
+# Also shown on the config menu's info screen (cfgMenu.h, NFO).
+set_source_files_properties(Src/menu/cfgMenu_glue.c PROPERTIES
+    COMPILE_DEFINITIONS "FIRMWARE_VERSION=\"${PROJECT_VERSION}\""
+)
 
 # Hardware inputs/outputs: shift-register buttons/LEDs, pots and CV inputs.
 add_library(lxr_io OBJECT
@@ -50,6 +54,12 @@ add_library(lxr_ui OBJECT
     Src/Parameters.c
     Src/menu/Cc2Text.c
     Src/menu/menu.c
+    Src/menu/lsMenu.c
+    Src/menu/lsMenu_glue.c
+    Src/menu/cfgMenu.c
+    Src/menu/cfgMenu_glue.c
+    Src/menu/mixMenu.c
+    Src/menu/mixMenu_glue.c
     Src/menu/screensaver.c
 )
 
@@ -57,6 +67,12 @@ add_library(lxr_ui OBJECT
 add_library(lxr_preset OBJECT
     Src/Preset/initKit.c
     Src/Preset/presetManager.c
+    Src/Preset/voicePreset.c
+    Src/Preset/voiceStore.c
+    Src/Preset/voiceLoad.c
+    Src/Preset/voiceLoad_engine.c
+    Src/Preset/undo.c
+    Src/globalMix.c
 )
 
 # DSP building blocks, drum voices and master effects.

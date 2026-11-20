@@ -11,6 +11,9 @@
  * Public License version 3, with the additional permission and terms in
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  */
+#include "menu/cfgMenu.h"
+#include "menu/mixMenu.h"
+#include "menu/lsMenu.h"
 #include <frontPanelParser_ui.h>
 #include "buttonHandler.h"
 #include "menu/menu.h"
@@ -323,26 +326,19 @@ static void buttonHandler_handleModeButtons(uint8_t mode) {
 	//toggle for mod matrix only
 	uint8_t toggle = (buttonHandler_stateMemory.selectButtonMode  == mode);
 
-	if(mode==SELECT_MODE_LOAD)
+	//the Load/Save button no longer cycles Load kit / Save kit / Save morph:
+	//it opens the Load/Save menu (lsMenu.c), which handles all four.
+	//Any other mode button closes that menu.
+	if(mode != SELECT_MODE_LOAD)
 	{
-		//Load kit, Save kit, Save Morph
-		switch(buttonHandler_stateMemory.selectButtonMode)
-		{
-		default:
-		case SELECT_MODE_SAVE_MORPH:
-			mode = SELECT_MODE_LOAD;
-			break;
-
-		case SELECT_MODE_LOAD:
-			mode = SELECT_MODE_SAVE;
-			break;
-
-		case SELECT_MODE_SAVE:
-			mode = SELECT_MODE_SAVE_MORPH;
-			break;
-		}
-
-		//mode = buttonHandler_stateMemory.selectButtonMode == mode ? SELECT_MODE_SAVE : mode;
+		lsMenu_forceClose();
+	}
+	//any mode button closes the mixer (Perf steps back to the Perform page);
+	//changed global volume/pan settings are saved now (mixMenu.h)
+	mixMenu_close();
+	if(mixMenu_takeChanged())
+	{
+		preset_saveGlobals();
 	}
 
 	buttonHandler_stateMemory.selectButtonMode = (uint8_t) (mode & 0x07);
@@ -428,16 +424,8 @@ static void buttonHandler_handleModeButtons(uint8_t mode) {
 			}
 			else
 			{
-				led_clearAllBlinkLeds();
-				led_setMode2(buttonHandler_stateMemory.selectButtonMode);
-
-				menu_setLoadSaveCategory(SAVE_TYPE_KIT);
-				//update the status LED
-			//	led_setMode2(2);
-
-				//led_setValue(1);
-				//buttonHandler_stateMemory.selectButtonMode = SELECT_MODE_LOAD;
-				menu_switchPage(LOAD_PAGE);
+				//open the Load/Save menu, or step back one level in it
+				lsMenu_onLoadSaveButton();
 			}
 		}
 		break;
@@ -484,6 +472,7 @@ static void buttonHandler_handleModeButtons(uint8_t mode) {
 		case SELECT_MODE_MENU:
 			led_clearAllBlinkLeds();
 			led_setMode2(buttonHandler_stateMemory.selectButtonMode);
+			cfgMenu_onEnter(); //config always opens on its overview
 			menu_switchPage(MENU_MIDI_PAGE);
 			break;
 	}
@@ -1761,14 +1750,23 @@ void buttonHandler_voiceButtonReleased(uint8_t voiceNr)
 				*/
 				{
 
-					if( (buttonHandler_stateMemory.selectButtonMode == SELECT_MODE_FX) ||(buttonHandler_stateMemory.selectButtonMode == SELECT_MODE_LOAD)||(buttonHandler_stateMemory.selectButtonMode == SELECT_MODE_SAVE))
+					lsMenu_dismissToast(); //a voice button ends the undo message
+					if(lsMenu_isActive())
 					{
-						buttonHandler_stateMemory.selectButtonMode = SELECT_MODE_VOICE;
-						led_setMode2(buttonHandler_stateMemory.selectButtonMode);
-						menu_switchSubPage(0, 0);
+						//the Load/Save menu stays open and follows the newly selected voice (lsMenu.h)
+						menu_repaintAll();
 					}
+					else
+					{
+						if( (buttonHandler_stateMemory.selectButtonMode == SELECT_MODE_FX) ||(buttonHandler_stateMemory.selectButtonMode == SELECT_MODE_LOAD)||(buttonHandler_stateMemory.selectButtonMode == SELECT_MODE_SAVE))
+						{
+							buttonHandler_stateMemory.selectButtonMode = SELECT_MODE_VOICE;
+							led_setMode2(buttonHandler_stateMemory.selectButtonMode);
+							menu_switchSubPage(0, 0);
+						}
 
-					menu_switchPage(voiceNr-1);
+						menu_switchPage(voiceNr-1);
+					}
 				//}
 				frontPanel_sendData(SEQ_CC, SEQ_SET_ACTIVE_TRACK, voiceNr-1);
 
@@ -1906,7 +1904,17 @@ void buttonHandler_buttonPressed(uint8_t buttonNr) {
 
 	case BUT_EDIT :
 	case BUT_MOD :
-		if(buttonHandler_getShiftButton())
+		if(buttonHandler_getShiftButton() && buttonNr == BUT_EDIT)
+		{
+			//shift + edit = config ("global edit"), see cfgMenu.h
+			buttonHandler_handleModeButtons(SELECT_MODE_MENU);
+			menu_resetActiveParameter();
+		}
+		else if(!buttonHandler_getShiftButton() && buttonNr == BUT_EDIT && cfgMenu_onEditButton())
+		{
+			//edit stepped back from a config sub-page to the config overview
+		}
+		else if(buttonHandler_getShiftButton())
 		{
 			//activate normal voice edit mode to access page 8 with LFOs
 			buttonHandler_handleModeButtons((uint8_t) (0));
@@ -1925,12 +1933,25 @@ void buttonHandler_buttonPressed(uint8_t buttonNr) {
 		}
 		break;
 	case BUT_SAVE_LOAD :
-		buttonHandler_handleModeButtons((uint8_t) (SELECT_MODE_LOAD));
+		if(buttonHandler_getShiftButton())
+		{
+			//shift + load/save = undo (lsMenu.h); config is on shift + edit
+			lsMenu_undo();
+		}
+		else
+		{
+			buttonHandler_handleModeButtons((uint8_t) (SELECT_MODE_LOAD));
+		}
 		break;
 
 	case BUT_PERF :
 
 		buttonHandler_handleModeButtons((uint8_t) (buttonNr - BUT_EDIT));
+		if(buttonHandler_getShiftButton())
+		{
+			//shift + perf = straight to the mixer (mixMenu.h)
+			mixMenu_open();
+		}
 
 
 		/*
@@ -2667,4 +2688,10 @@ void buttonHandler_init()
 	led_setActiveSelectButton(menu_getSubPage()+1);
 	menu_resetActiveParameter();
 	buttonHandler_buttonPressed(BUT_2);
+}
+//-----------------------------------------------------------------------------
+// switch to the Perform page, exactly like pressing Perf (lsMenu.h)
+void buttonHandler_enterPerformMode(void)
+{
+	buttonHandler_handleModeButtons(SELECT_MODE_PERF);
 }

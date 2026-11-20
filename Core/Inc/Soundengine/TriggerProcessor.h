@@ -97,6 +97,7 @@ extern uint8_t trigger_prescalerClockInput;
 
 uint8_t Trigger_getAccent(uint8_t voice);
 
+extern volatile uint8_t Trigger_openHatDeferred; /* see voiceLoad.h */
 uint8_t Trigger_getVoiceTriggered(uint8_t voice);
 void Trigger_resetVoiceTriggered(uint8_t voice);
 

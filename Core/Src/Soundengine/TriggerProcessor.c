@@ -11,6 +11,7 @@
  * NOTICE.md. See LICENSE and NOTICE.md in the root of the repository.
  */
 
+#include "Preset/voiceLoad.h"
 #include "main.h"
 #include "stm32f7xx_it.h"
 
@@ -281,6 +282,9 @@ uint8_t Trigger_getAccent(uint8_t voice)
 
 static uint8_t voiceTriggered[6] = {0,0,0,0,0,0};
 
+/* open hihat note postponed while voice 6's sound was being changed */
+volatile uint8_t Trigger_openHatDeferred = 0;
+
 uint8_t Trigger_getVoiceTriggered(uint8_t voice) {
 	if(voiceTriggered[voice]) {
 		return 1;
@@ -362,8 +366,17 @@ void EXTI9_5_IRQHandler(void)
 		__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_9);
 
 		const uint8_t voice = 6;
-		const uint8_t vel = Trigger_getAccent(voice);
-		voiceControl_noteOn(voice , SEQ_DEFAULT_NOTE, vel);
+		if(voiceLoad_isApplying(5))
+		{
+			/* voice 6's sound is being changed: start this note on the next
+			 * SysTick instead (voiceLoad.h) */
+			Trigger_openHatDeferred = 1;
+		}
+		else
+		{
+			const uint8_t vel = Trigger_getAccent(voice);
+			voiceControl_noteOn(voice , SEQ_DEFAULT_NOTE, vel);
+		}
 	}
 #if !EURORACK_MODULE
 	/* EXTI line interrupt detected */
